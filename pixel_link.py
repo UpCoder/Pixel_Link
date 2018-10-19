@@ -399,7 +399,7 @@ def mask_to_bboxes(mask, score_map, image_shape =  None, min_area = None,
         bboxes.append(xys)
         xs, ys = np.where(bbox_mask)
 
-        scores.append(np.mean(score_map[ys, xs]))
+        scores.append(np.mean(score_map[xs, ys]))
         
     return bboxes, scores, score_map
 
