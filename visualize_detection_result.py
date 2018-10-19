@@ -11,7 +11,7 @@ def draw_bbox(image_data, line, color):
     points = np.reshape(points, (4, 2))
     cnts = util.img.points_to_contours(points)
     util.img.draw_contours(image_data, cnts, -1, color = color, border_width = 3)
-    
+
        
 def visualize(image_root, det_root, output_root, gt_root = None):
     def read_gt_file(image_name):

@@ -23,7 +23,7 @@ tf.app.flags.DEFINE_string('checkpoint_path', None,
    'the path of pretrained model to be used. If there are checkpoints\
     in train_dir, this config will be ignored.')
 tf.app.flags.DEFINE_string('pred_path', None, 'save the pred path, it only save top left and bottom right')
-
+tf.app.flags.DEFINE_string('score_map_path', None, 'save the score map path')
 tf.app.flags.DEFINE_float('gpu_memory_fraction', -1, 
   'the gpu memory fraction to be used. If less than 0, allow_growth = True is used.')
 
@@ -71,6 +71,7 @@ def config_initialization():
     tf.logging.set_verbosity(tf.logging.DEBUG)
     config.load_config(FLAGS.checkpoint_path)
     config.load_config(FLAGS.pred_path)
+    config.load_config(FLAGS.score_map_path)
     config.init_config(image_shape, 
                        batch_size = 1, 
                        pixel_conf_threshold = 0.8,
@@ -109,8 +110,15 @@ def to_txt(txt_path, image_name,
         util.io.write_lines(filename, lines)
         print('result has been written to:', filename)
     # 其实只有一个image, [1, W, H, C]
+    print('the shape of pixel_pos_scores is ', np.shape(pixel_pos_scores), np.min(pixel_pos_scores),
+          np.max(pixel_pos_scores))
     mask = pixel_link.decode_batch(pixel_pos_scores, link_pos_scores)[0, ...]
-    bboxes, bboxes_score = pixel_link.mask_to_bboxes(mask, pixel_pos_scores, image_data.shape)
+    bboxes, bboxes_score, pixel_pos_scores = pixel_link.mask_to_bboxes(mask, pixel_pos_scores, image_data.shape)
+    print('the shape of pixel_pos_scores is ', np.shape(pixel_pos_scores), np.min(pixel_pos_scores),
+          np.max(pixel_pos_scores))
+    score_map_path = util.io.join_path(FLAGS.score_map_path, '%s.jpg'%image_name)
+    cv2.imwrite(score_map_path, np.asarray(pixel_pos_scores * 255, np.uint8))
+    print('score will be written in ', score_map_path)
     write_result_as_txt(image_name, bboxes, txt_path)
     write_result_as_pred_txt(image_name, bboxes, bboxes_score)
 

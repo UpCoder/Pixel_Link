@@ -372,7 +372,7 @@ def mask_to_bboxes(mask, score_map, image_shape =  None, min_area = None,
     #
     mask = util.img.resize(img = mask, size = (image_w, image_h), 
                            interpolation = cv2.INTER_NEAREST)
-    score_map = util.img.resize(img=score_map, size=(image_w, image_h))
+    score_map = util.img.resize(img=score_map[0], size=(image_w, image_h))
     scores = []
 
     print('the max score is %.4f, the min score is %.4f' % (np.max(score_map), np.min(score_map)))
@@ -401,7 +401,7 @@ def mask_to_bboxes(mask, score_map, image_shape =  None, min_area = None,
 
         scores.append(np.mean(score_map[ys, xs]))
         
-    return bboxes, scores
+    return bboxes, scores, score_map
 
 
 #============================Decode End===============================
