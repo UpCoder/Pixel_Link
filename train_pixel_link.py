@@ -277,7 +277,7 @@ def train(train_op):
         sess_config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_memory_fraction
     
     init_fn = util.tf.get_init_fn(checkpoint_path = FLAGS.checkpoint_path, train_dir = FLAGS.train_dir, 
-                          ignore_missing_vars = FLAGS.ignore_missing_vars, checkpoint_exclude_scopes = FLAGS.checkpoint_exclude_scopes)
+                                ignore_missing_vars = FLAGS.ignore_missing_vars, checkpoint_exclude_scopes = FLAGS.checkpoint_exclude_scopes)
     saver = tf.train.Saver(max_to_keep = 500, write_version = 2)
     slim.learning.train(
             train_op,

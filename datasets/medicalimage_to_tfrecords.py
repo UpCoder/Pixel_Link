@@ -72,7 +72,7 @@ MEDICAL_LABELS = {
     'METS': (1, 'Begin'),
 }
 
-def _process_image(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
+def _process_image(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS, multiphase_flag):
     """Process a image and annotation file.
 
     Args:
@@ -87,6 +87,16 @@ def _process_image(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
     filename = directory + DIRECTORY_IMAGES + name + '.jpg'
     print('filename is ', filename)
     image_data = tf.gfile.FastGFile(filename, 'rb').read()
+    # print(image_data)
+    # if not multiphase_flag:
+    #     filename = directory + DIRECTORY_IMAGES + name + '.jpg'
+    #     print('filename is ', filename)
+    #     image_data = tf.gfile.FastGFile(filename, 'rb').read()
+    #     print(image_data)
+    # else:
+    #     filename = directory + DIRECTORY_IMAGES + name + '.bin'
+    #     print('filename is ', filename)
+    #     image_data = tf.gfile.FastGFile(filename, 'rb').read()
 
     # Read the XML annotation file.
     filename = os.path.join(directory, DIRECTORY_ANNOTATIONS, name + '.xml')
@@ -129,7 +139,7 @@ def _process_image(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
 
 
 def _convert_to_example(image_data, labels, labels_text, bboxes, shape,
-                        difficult, truncated):
+                        difficult, truncated, multiphase_flag):
     """Build an Example proto for an image example.
 
     Args:
@@ -172,7 +182,7 @@ def _convert_to_example(image_data, labels, labels_text, bboxes, shape,
     return example
 
 
-def _add_to_tfrecord(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
+def _add_to_tfrecord(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS, multiphase_flag):
     """Loads data from image and annotations files and add them to a TFRecord.
 
     Args:
@@ -181,9 +191,9 @@ def _add_to_tfrecord(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIREC
       tfrecord_writer: The TFRecord writer to use for writing.
     """
     image_data, shape, bboxes, labels, labels_text, difficult, truncated = \
-        _process_image(dataset_dir, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS)
+        _process_image(dataset_dir, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS, multiphase_flag)
     example = _convert_to_example(image_data, labels, labels_text,
-                                  bboxes, shape, difficult, truncated)
+                                  bboxes, shape, difficult, truncated, multiphase_flag=multiphase_flag)
     tfrecord_writer.write(example.SerializeToString())
 
 
@@ -192,7 +202,7 @@ def _get_output_filename(output_dir, name, idx):
 
 
 def run(dataset_dir, output_dir, name='voc_train', shuffling=False,
-        DIRECTORY_IMAGES='JPEGImages/', DIRECTORY_ANNOTATIONS='Annotations/'):
+        DIRECTORY_IMAGES='JPEGImages/', DIRECTORY_ANNOTATIONS='Annotations/', multiphase_flag=False):
     """Runs the conversion operation.
 
     Args:
@@ -223,7 +233,8 @@ def run(dataset_dir, output_dir, name='voc_train', shuffling=False,
 
                 filename = filenames[i]
                 img_name = filename[:-4]
-                _add_to_tfrecord(dataset_dir, img_name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS)
+                _add_to_tfrecord(dataset_dir, img_name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS,
+                                 multiphase_flag)
                 i += 1
                 j += 1
             fidx += 1

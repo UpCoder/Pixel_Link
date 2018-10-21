@@ -45,18 +45,19 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_string(
     'stage_name', 'train', 'the name of current stage'
 )
-
+tf.app.flags.DEFINE_boolean(
+    'multiphase', False, 'the dataset is multiphase ?'
+)
 def main(_):
     if not FLAGS.dataset_dir:
         raise ValueError('You must supply the dataset directory with --dataset_dir')
     print('Dataset directory:', FLAGS.dataset_dir)
     print('Output directory:', FLAGS.output_dir)
 
-
     if FLAGS.dataset_name == 'medicalimage':
         medicalimage_to_tfrecords.run(FLAGS.dataset_dir, FLAGS.output_dir, FLAGS.output_name,
                                       DIRECTORY_IMAGES=FLAGS.stage_name + '/',
-                                      DIRECTORY_ANNOTATIONS=FLAGS.stage_name + '_xml/')
+                                      DIRECTORY_ANNOTATIONS=FLAGS.stage_name + '_xml/', multiphase_flag=FLAGS.multiphase)
     else:
         raise ValueError('Dataset [%s] was not recognized.' % FLAGS.dataset_name)
 
