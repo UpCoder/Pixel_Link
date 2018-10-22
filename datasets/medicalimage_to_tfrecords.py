@@ -72,7 +72,82 @@ MEDICAL_LABELS = {
     'METS': (1, 'Begin'),
 }
 
-def _process_image(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS, multiphase_flag):
+
+def _process_image_multiphase_multislice(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
+    """Process a image and annotation file.
+
+    Args:
+      filename: string, path to an image file e.g., '/path/to/example.JPG'.
+      coder: instance of ImageCoder to provide TensorFlow image coding utils.
+    Returns:
+      image_buffer: string, JPEG encoding of RGB image.
+      height: integer, image height in pixels.
+      width: integer, image width in pixels.
+    """
+    # Read the image file.
+    nc_filename = directory + DIRECTORY_IMAGES + name + '_NNC.jpg'
+    print('filename is ', nc_filename)
+    nc_image_data = tf.gfile.FastGFile(nc_filename, 'rb').read()
+
+    art_filename = directory + DIRECTORY_IMAGES + name + '_ART.jpg'
+    print('filename is ', art_filename)
+    art_image_data = tf.gfile.FastGFile(art_filename, 'rb').read()
+
+    pv_filename = directory + DIRECTORY_IMAGES + name + '_PPV.jpg'
+    print('filename is ', pv_filename)
+    pv_image_data = tf.gfile.FastGFile(pv_filename, 'rb').read()
+    # print(image_data)
+    # if not multiphase_flag:
+    #     filename = directory + DIRECTORY_IMAGES + name + '.jpg'
+    #     print('filename is ', filename)
+    #     image_data = tf.gfile.FastGFile(filename, 'rb').read()
+    #     print(image_data)
+    # else:
+    #     filename = directory + DIRECTORY_IMAGES + name + '.bin'
+    #     print('filename is ', filename)
+    #     image_data = tf.gfile.FastGFile(filename, 'rb').read()
+
+    # Read the XML annotation file.
+    filename = os.path.join(directory, DIRECTORY_ANNOTATIONS, name + '.xml')
+    tree = ET.parse(filename)
+    root = tree.getroot()
+
+    # Image shape.
+    size = root.find('size')
+    shape = [int(size.find('height').text),
+             int(size.find('width').text),
+             int(size.find('depth').text)]
+    # Find annotations.
+    bboxes = []
+    labels = []
+    labels_text = []
+    difficult = []
+    truncated = []
+    for obj in root.findall('object'):
+        label = obj.find('name').text
+        labels.append(int(MEDICAL_LABELS[label][0]))
+        # labels.append(0)
+        labels_text.append(label.encode('ascii'))
+
+        if obj.find('difficult'):
+            difficult.append(int(obj.find('difficult').text))
+        else:
+            difficult.append(0)
+        if obj.find('truncated'):
+            truncated.append(int(obj.find('truncated').text))
+        else:
+            truncated.append(0)
+
+        bbox = obj.find('bndbox')
+        bboxes.append((float(bbox.find('ymin').text) / shape[0],
+                       float(bbox.find('xmin').text) / shape[1],
+                       float(bbox.find('ymax').text) / shape[0],
+                       float(bbox.find('xmax').text) / shape[1]
+                       ))
+    return nc_image_data, art_image_data, pv_image_data, shape, bboxes, labels, labels_text, difficult, truncated
+
+
+def _process_image(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
     """Process a image and annotation file.
 
     Args:
@@ -138,8 +213,54 @@ def _process_image(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS, mul
     return image_data, shape, bboxes, labels, labels_text, difficult, truncated
 
 
+def _convert_to_example_multiphase_multislice(nc_image_data, art_image_data, pv_image_data, labels, labels_text,
+                                              bboxes, shape, difficult, truncated):
+    """Build an Example proto for an image example.
+
+    Args:
+      image_data: string, JPEG encoding of RGB image;
+      labels: list of integers, identifier for the ground truth;
+      labels_text: list of strings, human-readable labels;
+      bboxes: list of bounding boxes; each box is a list of integers;
+          specifying [xmin, ymin, xmax, ymax]. All boxes are assumed to belong
+          to the same label as the image label.
+      shape: 3 integers, image shapes in pixels.
+    Returns:
+      Example proto
+    """
+    xmin = []
+    ymin = []
+    xmax = []
+    ymax = []
+    for b in bboxes:
+        assert len(b) == 4
+        # pylint: disable=expression-not-assigned
+        [l.append(point) for l, point in zip([ymin, xmin, ymax, xmax], b)]
+        # pylint: enable=expression-not-assigned
+
+    image_format = b'JPEG'
+    example = tf.train.Example(features=tf.train.Features(feature={
+            'image/height': int64_feature(shape[0]),
+            'image/width': int64_feature(shape[1]),
+            'image/channels': int64_feature(shape[2]),
+            'image/shape': int64_feature(shape),
+            'image/object/bbox/xmin': float_feature(xmin),
+            'image/object/bbox/xmax': float_feature(xmax),
+            'image/object/bbox/ymin': float_feature(ymin),
+            'image/object/bbox/ymax': float_feature(ymax),
+            'image/object/bbox/label': int64_feature(labels),
+            'image/object/bbox/label_text': bytes_feature(labels_text),
+            'image/object/bbox/difficult': int64_feature(difficult),
+            'image/object/bbox/truncated': int64_feature(truncated),
+            'image/format': bytes_feature(image_format),
+            'image/nc/encoded': bytes_feature(nc_image_data),
+            'image/art/encoded': bytes_feature(art_image_data),
+            'image/pv/encoded': bytes_feature(pv_image_data)}))
+    return example
+
+
 def _convert_to_example(image_data, labels, labels_text, bboxes, shape,
-                        difficult, truncated, multiphase_flag):
+                        difficult, truncated):
     """Build an Example proto for an image example.
 
     Args:
@@ -182,7 +303,15 @@ def _convert_to_example(image_data, labels, labels_text, bboxes, shape,
     return example
 
 
-def _add_to_tfrecord(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS, multiphase_flag):
+def _add_to_tfrecord_multiphase_multislice(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
+    nc_image_data, art_image_data, pv_image_data, shape, bboxes, labels, labels_text, difficult, truncated = \
+        _process_image_multiphase_multislice(dataset_dir, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS)
+    example = _convert_to_example_multiphase_multislice(nc_image_data, art_image_data, pv_image_data, labels,
+                                                        labels_text, bboxes, shape, difficult, truncated)
+    tfrecord_writer.write(example.SerializeToString())
+
+
+def _add_to_tfrecord(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
     """Loads data from image and annotations files and add them to a TFRecord.
 
     Args:
@@ -191,9 +320,9 @@ def _add_to_tfrecord(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIREC
       tfrecord_writer: The TFRecord writer to use for writing.
     """
     image_data, shape, bboxes, labels, labels_text, difficult, truncated = \
-        _process_image(dataset_dir, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS, multiphase_flag)
+        _process_image(dataset_dir, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS)
     example = _convert_to_example(image_data, labels, labels_text,
-                                  bboxes, shape, difficult, truncated, multiphase_flag=multiphase_flag)
+                                  bboxes, shape, difficult, truncated)
     tfrecord_writer.write(example.SerializeToString())
 
 
@@ -202,7 +331,7 @@ def _get_output_filename(output_dir, name, idx):
 
 
 def run(dataset_dir, output_dir, name='voc_train', shuffling=False,
-        DIRECTORY_IMAGES='JPEGImages/', DIRECTORY_ANNOTATIONS='Annotations/', multiphase_flag=False):
+        DIRECTORY_IMAGES='JPEGImages/', DIRECTORY_ANNOTATIONS='Annotations/', multiphase_multislice_flag=False):
     """Runs the conversion operation.
 
     Args:
@@ -232,9 +361,15 @@ def run(dataset_dir, output_dir, name='voc_train', shuffling=False,
                 sys.stdout.flush()
 
                 filename = filenames[i]
-                img_name = filename[:-4]
-                _add_to_tfrecord(dataset_dir, img_name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS,
-                                 multiphase_flag)
+
+                if not multiphase_multislice_flag:
+                    img_name = filename[:-4]
+                    _add_to_tfrecord(dataset_dir, img_name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS)
+                else:
+                    img_name = filename[:-4]
+                    print(filename)
+                    _add_to_tfrecord_multiphase_multislice(dataset_dir, img_name, tfrecord_writer, DIRECTORY_IMAGES,
+                                                           DIRECTORY_ANNOTATIONS)
                 i += 1
                 j += 1
             fidx += 1
