@@ -100,10 +100,11 @@ def get_init_fn(checkpoint_path, train_dir, ignore_missing_vars = False,
         return None
 
     exclusions = []
-    if checkpoint_exclude_scopes:
-        exclusions = [scope.strip()
-                      for scope in checkpoint_exclude_scopes.split(',')]
-
+    # if checkpoint_exclude_scopes:
+    #     exclusions = [scope.strip()
+    #                   for scope in checkpoint_exclude_scopes.split(',')]
+    exclusions = checkpoint_exclude_scopes
+    print('exclusions is ', exclusions)
     # TODO(sguada) variables.filter_variables()
     variables_to_restore = []
     for var in slim.get_model_variables():
@@ -113,6 +114,7 @@ def get_init_fn(checkpoint_path, train_dir, ignore_missing_vars = False,
                 excluded = True
                 break
         if not excluded:
+            print('add to restore: ', var.op.name)
             variables_to_restore.append(var)
     # Change model scope if necessary.
     if checkpoint_model_scope is not None:

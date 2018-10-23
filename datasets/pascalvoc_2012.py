@@ -1,3 +1,4 @@
+# -*- coding=utf-8 -*-
 # Copyright 2015 Paul Balanca. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -68,7 +69,7 @@ SPLITS_TO_STATISTICS = {
 NUM_CLASSES = 20
 
 
-def get_split(split_name, dataset_dir, file_pattern=None, reader=None):
+def get_split(split_name, dataset_dir, file_pattern=None, reader=None, multiphase_multislice_flag=False):
     """Gets a dataset tuple with instructions for reading ImageNet.
 
     Args:
@@ -78,6 +79,7 @@ def get_split(split_name, dataset_dir, file_pattern=None, reader=None):
         It is assumed that the pattern contains a '%s' string so that the split
         name can be inserted.
       reader: The TensorFlow reader type.
+      multiphase_multislice_flag: 代表要解析的tfrecord文件是不是多phase多slice的数据
 
     Returns:
       A `Dataset` namedtuple.
@@ -87,9 +89,15 @@ def get_split(split_name, dataset_dir, file_pattern=None, reader=None):
     """
     if not file_pattern:
         file_pattern = FILE_PATTERN
-    return pascalvoc_common.get_split(split_name, dataset_dir,
-                                      file_pattern, reader,
-                                      SPLITS_TO_SIZES,
-                                      ITEMS_TO_DESCRIPTIONS,
-                                      NUM_CLASSES)
-
+    if not multiphase_multislice_flag:
+        return pascalvoc_common.get_split(split_name, dataset_dir,
+                                          file_pattern, reader,
+                                          SPLITS_TO_SIZES,
+                                          ITEMS_TO_DESCRIPTIONS,
+                                          NUM_CLASSES)
+    else:
+        return pascalvoc_common.get_split_multiphase_multislice(split_name, dataset_dir,
+                                                                file_pattern, reader,
+                                                                SPLITS_TO_SIZES,
+                                                                ITEMS_TO_DESCRIPTIONS,
+                                                                NUM_CLASSES)

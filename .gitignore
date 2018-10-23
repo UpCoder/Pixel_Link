@@ -114,3 +114,5 @@ checkpoints/
 ./checkpoints/
 
 .idea/
+
+test.py

@@ -171,6 +171,129 @@ def bboxes_crop_or_pad(bboxes, xs, ys,
         return bboxes, xs, ys
 
 
+def resize_image_bboxes_with_crop_or_pad_multiphase_multislice(nc_image, art_image, pv_image, bboxes, xs, ys,
+                                         target_height, target_width):
+    """Crops and/or pads an image to a target width and height.
+    Resizes an image to a target width and height by either centrally
+    cropping the image or padding it evenly with zeros.
+
+    If `width` or `height` is greater than the specified `target_width` or
+    `target_height` respectively, this op centrally crops along that dimension.
+    If `width` or `height` is smaller than the specified `target_width` or
+    `target_height` respectively, this op centrally pads with 0 along that
+    dimension.
+    Args:
+      image: 3-D tensor of shape `[height, width, channels]`
+      target_height: Target height.
+      target_width: Target width.
+    Raises:
+      ValueError: if `target_height` or `target_width` are zero or negative.
+    Returns:
+      Cropped and/or padded image of shape
+        `[target_height, target_width, channels]`
+    """
+    with tf.name_scope('resize_with_crop_or_pad'):
+        nc_image = ops.convert_to_tensor(nc_image, name='nc_image')
+        art_image = ops.convert_to_tensor(art_image, name='art_image')
+        pv_image = ops.convert_to_tensor(pv_image, name='pv_image')
+
+        assert_ops = []
+        assert_ops += _Check3DImage(nc_image, require_static=False)
+        assert_ops += _Check3DImage(art_image, require_static=False)
+        assert_ops += _Check3DImage(pv_image, require_static=False)
+        assert_ops += _assert(target_width > 0, ValueError,
+                              'target_width must be > 0.')
+        assert_ops += _assert(target_height > 0, ValueError,
+                              'target_height must be > 0.')
+
+        nc_image = control_flow_ops.with_dependencies(assert_ops, nc_image)
+        art_image = control_flow_ops.with_dependencies(assert_ops, art_image)
+        pv_image = control_flow_ops.with_dependencies(assert_ops, pv_image)
+        # `crop_to_bounding_box` and `pad_to_bounding_box` have their own checks.
+        # Make sure our checks come first, so that error messages are clearer.
+        if _is_tensor(target_height):
+            target_height = control_flow_ops.with_dependencies(
+                assert_ops, target_height)
+        if _is_tensor(target_width):
+            target_width = control_flow_ops.with_dependencies(assert_ops, target_width)
+
+        def max_(x, y):
+            if _is_tensor(x) or _is_tensor(y):
+                return math_ops.maximum(x, y)
+            else:
+                return max(x, y)
+
+        def min_(x, y):
+            if _is_tensor(x) or _is_tensor(y):
+                return math_ops.minimum(x, y)
+            else:
+                return min(x, y)
+
+        def equal_(x, y):
+            if _is_tensor(x) or _is_tensor(y):
+                return math_ops.equal(x, y)
+            else:
+                return x == y
+
+        height, width, _ = _ImageDimensions(pv_image)
+        width_diff = target_width - width
+        offset_crop_width = max_(-width_diff // 2, 0)
+        offset_pad_width = max_(width_diff // 2, 0)
+
+        height_diff = target_height - height
+        offset_crop_height = max_(-height_diff // 2, 0)
+        offset_pad_height = max_(height_diff // 2, 0)
+
+        # Maybe crop if needed.
+        height_crop = min_(target_height, height)
+        width_crop = min_(target_width, width)
+        nc_cropped = tf.image.crop_to_bounding_box(nc_image, offset_crop_height, offset_crop_width,
+                                                   height_crop, width_crop)
+        art_cropped = tf.image.crop_to_bounding_box(art_image, offset_crop_height, offset_crop_width,
+                                                    height_crop, width_crop)
+        pv_cropped = tf.image.crop_to_bounding_box(pv_image, offset_crop_height, offset_crop_width,
+                                                   height_crop, width_crop)
+        bboxes, xs, ys = bboxes_crop_or_pad(bboxes, xs, ys,
+                                    height, width,
+                                    -offset_crop_height, -offset_crop_width,
+                                    height_crop, width_crop)
+        # Maybe pad if needed.
+        nc_resized = tf.image.pad_to_bounding_box(nc_cropped, offset_pad_height, offset_pad_width,
+                                                  target_height, target_width)
+        art_resized = tf.image.pad_to_bounding_box(art_cropped, offset_pad_height, offset_pad_width,
+                                                   target_height, target_width)
+        pv_resized = tf.image.pad_to_bounding_box(pv_cropped, offset_pad_height, offset_pad_width,
+                                                  target_height, target_width)
+        bboxes, xs, ys = bboxes_crop_or_pad(bboxes, xs, ys,
+                                    height_crop, width_crop,
+                                    offset_pad_height, offset_pad_width,
+                                    target_height, target_width)
+
+        # In theory all the checks below are redundant.
+        if nc_resized.get_shape().ndims is None:
+            raise ValueError('resized contains no shape.')
+
+        if art_resized.get_shape().ndims is None:
+            raise ValueError('resized contains no shape.')
+
+        if pv_resized.get_shape().ndims is None:
+            raise ValueError('resized contains no shape.')
+
+        resized_height, resized_width, _ = _ImageDimensions(pv_resized)
+
+        assert_ops = []
+        assert_ops += _assert(equal_(resized_height, target_height), ValueError,
+                              'resized height is not correct.')
+        assert_ops += _assert(equal_(resized_width, target_width), ValueError,
+                              'resized width is not correct.')
+
+        pv_resized = control_flow_ops.with_dependencies(assert_ops, pv_resized)
+        art_resized = control_flow_ops.with_dependencies(assert_ops, art_resized)
+        nc_resized = control_flow_ops.with_dependencies(assert_ops, nc_resized)
+        return nc_resized, art_resized, pv_resized, bboxes, xs, ys
+
+
+
 def resize_image_bboxes_with_crop_or_pad(image, bboxes, xs, ys,
                                          target_height, target_width):
     """Crops and/or pads an image to a target width and height.
@@ -311,6 +434,20 @@ def random_flip_left_right(image, bboxes, seed=None):
                                        lambda: flip_bboxes(bboxes),
                                        lambda: bboxes)
         return fix_image_flip_shape(image, result), bboxes
+
+
+def random_rotate90_multiphase_multislice(nc_image, art_image, pv_image, bboxes, xs, ys):
+    with tf.name_scope('random_rotate90'):
+        k = random_ops.random_uniform([], 0, 10000)
+        k = tf.cast(k, tf.int32)
+
+        image_shape = tf.shape(nc_image)
+        h, w = image_shape[0], image_shape[1]
+        nc_image = tf.image.rot90(nc_image, k=k)
+        art_image = tf.image.rot90(art_image, k=k)
+        pv_image = tf.image.rot90(pv_image, k=k)
+        bboxes, xs, ys = rotate90(bboxes, xs, ys, k)
+        return nc_image, art_image, pv_image, bboxes, xs, ys
 
 
 def random_rotate90(image, bboxes, xs, ys):

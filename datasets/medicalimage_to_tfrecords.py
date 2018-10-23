@@ -86,15 +86,24 @@ def _process_image_multiphase_multislice(directory, name, DIRECTORY_IMAGES, DIRE
     """
     # Read the image file.
     nc_filename = directory + DIRECTORY_IMAGES + name + '_NNC.jpg'
-    print('filename is ', nc_filename)
+    print('nc filename is ', nc_filename)
+    if not os.path.exists(nc_filename):
+        print('it does not exists')
+        assert False
     nc_image_data = tf.gfile.FastGFile(nc_filename, 'rb').read()
 
     art_filename = directory + DIRECTORY_IMAGES + name + '_ART.jpg'
-    print('filename is ', art_filename)
+    print('art filename is ', art_filename)
+    if not os.path.exists(art_filename):
+        print('it does not exists')
+        assert False
     art_image_data = tf.gfile.FastGFile(art_filename, 'rb').read()
 
     pv_filename = directory + DIRECTORY_IMAGES + name + '_PPV.jpg'
-    print('filename is ', pv_filename)
+    print('pv filename is ', pv_filename)
+    if not os.path.exists(pv_filename):
+        print('it does not exists')
+        assert False
     pv_image_data = tf.gfile.FastGFile(pv_filename, 'rb').read()
     # print(image_data)
     # if not multiphase_flag:

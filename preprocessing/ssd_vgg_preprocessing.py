@@ -1,3 +1,4 @@
+# -*- coding=utf-8 -*-
 # Copyright 2015 Paul Balanca. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -110,6 +111,25 @@ def tf_summary_image(image, bboxes, name='image', unwhitened=False):
     tf.summary.image(name, image_with_box)
 
 
+def apply_with_random_selector_multiphase_multislice(total_x, func, num_cases):
+    """Computes func(x, sel), with sel sampled from [0...num_cases-1].
+    主要功能是在执行func的时候传递不同的参数(order)
+    Args:
+        total_x
+        func: Python function to apply.
+        num_cases: Python int32, number of cases to sample sel from.
+
+    Returns:
+        The result of func(x, sel), where func receives the value of the
+        selector as a python integer, but sel is sampled dynamically.
+    """
+    sel = tf.random_uniform([], maxval=num_cases, dtype=tf.int32)
+    # Pass the real x only to one of the func calls.
+    return control_flow_ops.merge([
+            func(control_flow_ops.switch(total_x, tf.equal(sel, case))[1], case)
+            for case in range(num_cases)])[0]
+
+
 def apply_with_random_selector(x, func, num_cases):
     """Computes func(x, sel), with sel sampled from [0...num_cases-1].
 
@@ -128,6 +148,116 @@ def apply_with_random_selector(x, func, num_cases):
             func(control_flow_ops.switch(x, tf.equal(sel, case))[1], case)
             for case in range(num_cases)])[0]
 
+
+def distort_color_multiphase_multislice(total_x, color_ordering=0, fast_mode=True, scope=None):
+    """Distort the color of a Tensor image.
+
+    Each color distortion is non-commutative and thus ordering of the color ops
+    matters. Ideally we would randomly permute the ordering of the color ops.
+    Rather then adding that level of complication, we select a distinct ordering
+    of color ops for each preprocessing thread.
+
+    Args:
+        image: 3-D Tensor containing single image in [0, 1].
+        color_ordering: Python int, a type of distortion (valid values: 0-3).
+        fast_mode: Avoids slower ops (random_hue and random_contrast)
+        scope: Optional scope for name_scope.
+    Returns:
+        3-D Tensor color-distorted image on range [0, 1]
+    Raises:
+        ValueError: if color_ordering not in [0, 3]
+    """
+    nc_image = total_x[:, :, 0:3]
+    art_image = total_x[:, :, 3:6]
+    pv_image = total_x[:, :, 6:9]
+    seed = np.random.randint(1, 100)
+    with tf.name_scope(scope, 'distort_color', [nc_image, art_image, pv_image]):
+        if fast_mode:
+            if color_ordering == 0:
+                nc_image = tf.image.random_brightness(nc_image, max_delta=32. / 255., seed=seed)
+                art_image = tf.image.random_brightness(art_image, max_delta=32. / 255., seed=seed)
+                pv_image = tf.image.random_brightness(pv_image, max_delta=32. / 255., seed=seed)
+                nc_image = tf.image.random_saturation(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_saturation(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_saturation(pv_image, lower=0.5, upper=1.5, seed=seed)
+            else:
+                nc_image = tf.image.random_saturation(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_saturation(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_saturation(pv_image, lower=0.5, upper=1.5, seed=seed)
+                nc_image = tf.image.random_brightness(nc_image, max_delta=32. / 255., seed=seed)
+                art_image = tf.image.random_brightness(art_image, max_delta=32. / 255., seed=seed)
+                pv_image = tf.image.random_brightness(pv_image, max_delta=32. / 255., seed=seed)
+        else:
+            if color_ordering == 0:
+                nc_image = tf.image.random_brightness(nc_image, max_delta=32. / 255., seed=seed)
+                art_image = tf.image.random_brightness(art_image, max_delta=32. / 255., seed=seed)
+                pv_image = tf.image.random_brightness(pv_image, max_delta=32. / 255., seed=seed)
+
+                nc_image = tf.image.random_saturation(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_saturation(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_saturation(pv_image, lower=0.5, upper=1.5, seed=seed)
+
+                nc_image = tf.image.random_hue(nc_image, max_delta=0.2, seed=seed)
+                art_image = tf.image.random_hue(art_image, max_delta=0.2, seed=seed)
+                pv_image = tf.image.random_hue(pv_image, max_delta=0.2, seed=seed)
+
+                nc_image = tf.image.random_contrast(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_contrast(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_contrast(pv_image, lower=0.5, upper=1.5, seed=seed)
+            elif color_ordering == 1:
+                nc_image = tf.image.random_saturation(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_saturation(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_saturation(pv_image, lower=0.5, upper=1.5, seed=seed)
+
+                nc_image = tf.image.random_brightness(nc_image, max_delta=32. / 255., seed=seed)
+                art_image = tf.image.random_brightness(art_image, max_delta=32. / 255., seed=seed)
+                pv_image = tf.image.random_brightness(pv_image, max_delta=32. / 255., seed=seed)
+
+                nc_image = tf.image.random_contrast(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_contrast(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_contrast(pv_image, lower=0.5, upper=1.5, seed=seed)
+
+                nc_image = tf.image.random_hue(nc_image, max_delta=0.2, seed=seed)
+                art_image = tf.image.random_hue(art_image, max_delta=0.2, seed=seed)
+                pv_image = tf.image.random_hue(pv_image, max_delta=0.2, seed=seed)
+
+            elif color_ordering == 2:
+                nc_image = tf.image.random_contrast(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_contrast(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_contrast(pv_image, lower=0.5, upper=1.5, seed=seed)
+
+                nc_image = tf.image.random_hue(nc_image, max_delta=0.2, seed=seed)
+                art_image = tf.image.random_hue(art_image, max_delta=0.2, seed=seed)
+                pv_image = tf.image.random_hue(pv_image, max_delta=0.2, seed=seed)
+
+                nc_image = tf.image.random_brightness(nc_image, max_delta=32. / 255., seed=seed)
+                art_image = tf.image.random_brightness(art_image, max_delta=32. / 255., seed=seed)
+                pv_image = tf.image.random_brightness(pv_image, max_delta=32. / 255., seed=seed)
+
+                nc_image = tf.image.random_saturation(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_saturation(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_saturation(pv_image, lower=0.5, upper=1.5, seed=seed)
+            elif color_ordering == 3:
+                nc_image = tf.image.random_hue(nc_image, max_delta=0.2, seed=seed)
+                art_image = tf.image.random_hue(art_image, max_delta=0.2, seed=seed)
+                pv_image = tf.image.random_hue(pv_image, max_delta=0.2, seed=seed)
+
+                nc_image = tf.image.random_saturation(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_saturation(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_saturation(pv_image, lower=0.5, upper=1.5, seed=seed)
+
+                nc_image = tf.image.random_contrast(nc_image, lower=0.5, upper=1.5, seed=seed)
+                art_image = tf.image.random_contrast(art_image, lower=0.5, upper=1.5, seed=seed)
+                pv_image = tf.image.random_contrast(pv_image, lower=0.5, upper=1.5, seed=seed)
+
+                nc_image = tf.image.random_brightness(nc_image, max_delta=32. / 255., seed=seed)
+                art_image = tf.image.random_brightness(art_image, max_delta=32. / 255., seed=seed)
+                pv_image = tf.image.random_brightness(pv_image, max_delta=32. / 255., seed=seed)
+            else:
+                raise ValueError('color_ordering must be in [0, 3]')
+        # The random_* ops do not necessarily clamp.
+        total_output = tf.concat([nc_image, art_image, pv_image], axis=-1)
+        return tf.clip_by_value(total_output, 0.0, 1.0)
 
 def distort_color(image, color_ordering=0, fast_mode=True, scope=None):
     """Distort the color of a Tensor image.
@@ -256,6 +386,88 @@ def distorted_bounding_box_crop(image,
         labels, bboxes, xs, ys = tfe.bboxes_filter_overlap(labels, bboxes, xs, ys, 
                     threshold=BBOX_CROP_OVERLAP, assign_value = LABEL_IGNORE)
         return cropped_image, labels, bboxes, xs, ys, distort_bbox
+
+
+def distorted_bounding_box_crop_multiphase_multislice(nc_image, art_image, pv_image,
+                                labels,
+                                bboxes,
+                                xs, ys,
+                                min_object_covered,
+                                aspect_ratio_range,
+                                area_range,
+                                max_attempts=200,
+                                scope=None):
+    """Generates cropped_image using a one of the bboxes randomly distorted.
+
+    See `tf.image.sample_distorted_bounding_box` for more documentation.
+
+    Args:
+        image: 3-D Tensor of image (it will be converted to floats in [0, 1]).
+        bbox: 2-D float Tensor of bounding boxes arranged [num_boxes, coords]
+            where each coordinate is [0, 1) and the coordinates are arranged
+            as [ymin, xmin, ymax, xmax]. If num_boxes is 0 then it would use the whole
+            image.
+        min_object_covered: An optional `float`. Defaults to `0.1`. The cropped
+            area of the image must contain at least this fraction of any bounding box
+            supplied.
+        aspect_ratio_range: An optional list of `floats`. The cropped area of the
+            image must have an aspect ratio = width / height within this range.
+        area_range: An optional list of `floats`. The cropped area of the image
+            must contain a fraction of the supplied image within in this range.
+        max_attempts: An optional `int`. Number of attempts at generating a cropped
+            region of the image of the specified constraints. After `max_attempts`
+            failures, return the entire image.
+        scope: Optional scope for name_scope.
+    Returns:
+        A tuple, a 3-D Tensor cropped_image and the distorted bbox
+    """
+    with tf.name_scope(scope, 'distorted_bounding_box_crop', [nc_image, art_image, pv_image, bboxes, xs, ys]):
+        # Each bounding box has shape [1, num_boxes, box coords] and
+        # the coordinates are ordered [ymin, xmin, ymax, xmax].
+        num_bboxes = tf.shape(bboxes)[0]
+
+        def has_bboxes():
+            return bboxes, labels, xs, ys
+
+        def no_bboxes():
+            xmin = tf.random_uniform((1, 1), minval=0, maxval=0.9)
+            ymin = tf.random_uniform((1, 1), minval=0, maxval=0.9)
+            w = tf.constant(0.1, dtype=tf.float32)
+            h = w
+            xmax = xmin + w
+            ymax = ymin + h
+            rnd_bboxes = tf.concat([ymin, xmin, ymax, xmax], axis=1)
+            rnd_labels = tf.constant([config.background_label], dtype=tf.int64)
+            rnd_xs = tf.concat([xmin, xmax, xmax, xmin], axis=1)
+            rnd_ys = tf.concat([ymin, ymin, ymax, ymax], axis=1)
+
+            return rnd_bboxes, rnd_labels, rnd_xs, rnd_ys
+
+        bboxes, labels, xs, ys = tf.cond(num_bboxes > 0, has_bboxes, no_bboxes)
+        bbox_begin, bbox_size, distort_bbox = tf.image.sample_distorted_bounding_box(
+            tf.shape(pv_image),
+            bounding_boxes=tf.expand_dims(bboxes, 0),
+            min_object_covered=min_object_covered,
+            aspect_ratio_range=aspect_ratio_range,
+            area_range=area_range,
+            max_attempts=max_attempts,
+            use_image_if_no_bounding_boxes=True)
+        distort_bbox = distort_bbox[0, 0]
+
+        # Crop the image to the specified bounding box.
+        nc_cropped_image = tf.slice(nc_image, bbox_begin, bbox_size)
+        art_cropped_image = tf.slice(art_image, bbox_begin, bbox_size)
+        pv_cropped_image = tf.slice(pv_image, bbox_begin, bbox_size)
+        # Restore the shape since the dynamic slice loses 3rd dimension.
+        nc_cropped_image.set_shape([None, None, 3])
+        art_cropped_image.set_shape([None, None, 3])
+        pv_cropped_image.set_shape([None, None, 3])
+
+        # Update bounding boxes: resize and filter out.
+        bboxes, xs, ys = tfe.bboxes_resize(distort_bbox, bboxes, xs, ys)
+        labels, bboxes, xs, ys = tfe.bboxes_filter_overlap(labels, bboxes, xs, ys,
+                                                           threshold=BBOX_CROP_OVERLAP, assign_value=LABEL_IGNORE)
+        return nc_cropped_image, art_cropped_image, pv_cropped_image, labels, bboxes, xs, ys, distort_bbox
 
 
 def tf_rotate_image(image, xs, ys):
@@ -411,6 +623,146 @@ def preprocess_for_train(image, labels, bboxes, xs, ys,
         return image, labels, bboxes, xs, ys
 
 
+def preprocess_for_train_multiphase_multislice(nc_image, art_image, pv_image, labels, bboxes, xs, ys,
+                         out_shape, data_format='NHWC',
+                         scope='ssd_preprocessing_train'):
+    """Preprocesses the given image for training.
+
+    Note that the actual resizing scale is sampled from
+        [`resize_size_min`, `resize_size_max`].
+
+    Args:
+        image: A `Tensor` representing an image of arbitrary size.
+        output_height: The height of the image after preprocessing.
+        output_width: The width of the image after preprocessing.
+        resize_side_min: The lower bound for the smallest side of the image for
+            aspect-preserving resizing.
+        resize_side_max: The upper bound for the smallest side of the image for
+            aspect-preserving resizing.
+
+    Returns:
+        A preprocessed image.
+    """
+    fast_mode = False
+    with tf.name_scope(scope, 'ssd_preprocessing_train', [nc_image, art_image, pv_image, labels, bboxes]):
+        if nc_image.get_shape().ndims != 3:
+            raise ValueError('Input must be of size [height, width, C>0]')
+        if art_image.get_shape().ndims != 3:
+            raise ValueError('Input must be of size [height, width, C>0]')
+        if pv_image.get_shape().ndims != 3:
+            raise ValueError('Input must be of size [height, width, C>0]')
+        # rotate image by 0, 0.5 * pi, pi, 1.5 * pi randomly
+        #         if USE_ROTATION:
+        #             image, bboxes, xs, ys = tf_image.random_rotate90(image, bboxes, xs, ys)
+        # rotate image by 0, 0.5 * pi, pi, 1.5 * pi randomly
+        if USE_ROTATION:
+            rnd = tf.random_uniform((), minval=0, maxval=1)
+
+            def rotate():
+                # return tf_image.random_rotate90(nc_image, bboxes, xs, ys),
+                return tf_image.random_rotate90_multiphase_multislice(nc_image, art_image, pv_image, bboxes, xs, ys)
+
+            def no_rotate():
+                return nc_image, art_image, pv_image, bboxes, xs, ys
+
+            nc_image, art_image, pv_image, bboxes, xs, ys = tf.cond(tf.less(rnd, config.rotation_prob), rotate,
+                                                                    no_rotate)
+
+        # expand image
+        if MAX_EXPAND_SCALE > 1:
+            rnd2 = tf.random_uniform((), minval=0, maxval=1)
+
+            def expand():
+                scale = tf.random_uniform([], minval=1.0,
+                                          maxval=MAX_EXPAND_SCALE, dtype=tf.float32)
+                image_shape = tf.cast(tf.shape(nc_image), dtype=tf.float32)
+                image_h, image_w = image_shape[0], image_shape[1]
+                target_h = tf.cast(image_h * scale, dtype=tf.int32)
+                target_w = tf.cast(image_w * scale, dtype=tf.int32)
+                tf.logging.info('expanded')
+                return tf_image.resize_image_bboxes_with_crop_or_pad_multiphase_multislice(
+                    nc_image, art_image, pv_image, bboxes, xs, ys, target_h, target_w)
+
+            def no_expand():
+                return nc_image, art_image, pv_image, bboxes, xs, ys
+
+            nc_image, art_image, pv_image, bboxes, xs, ys = tf.cond(tf.less(rnd2, config.expand_prob), expand,
+                                                                    no_expand)
+
+        # Convert to float scaled [0, 1].
+        if nc_image.dtype != tf.float32:
+            nc_image = tf.image.convert_image_dtype(nc_image, dtype=tf.float32)
+        if art_image.dtype != tf.float32:
+            art_image = tf.image.convert_image_dtype(art_image, dtype=tf.float32)
+        if pv_image.dtype != tf.float32:
+            pv_image = tf.image.convert_image_dtype(pv_image, dtype=tf.float32)
+        #         tf_summary_image(image, bboxes, 'image_with_bboxes')
+
+        # Distort image and bounding boxes.
+
+        nc_dst_image, art_dst_image, pv_dst_image, labels, bboxes, xs, ys, distort_bbox = \
+            distorted_bounding_box_crop_multiphase_multislice(nc_image, art_image, pv_image, labels, bboxes, xs, ys,
+                                                              min_object_covered=MIN_OBJECT_COVERED,
+                                                              aspect_ratio_range=CROP_ASPECT_RATIO_RANGE,
+                                                              area_range=AREA_RANGE)
+        # Resize image to output size.
+        nc_dst_image = tf_image.resize_image(nc_dst_image, out_shape,
+                                          method=tf.image.ResizeMethod.BILINEAR,
+                                          align_corners=False)
+        tf_summary_image(nc_dst_image, bboxes, 'image_shape_distorted/nc')
+
+        art_dst_image = tf_image.resize_image(art_dst_image, out_shape,
+                                              method=tf.image.ResizeMethod.BILINEAR,
+                                              align_corners=False)
+        tf_summary_image(art_dst_image, bboxes, 'image_shape_distorted/art')
+
+        pv_dst_image = tf_image.resize_image(pv_dst_image, out_shape,
+                                             method=tf.image.ResizeMethod.BILINEAR,
+                                             align_corners=False)
+        tf_summary_image(pv_dst_image, bboxes, 'image_shape_distorted/pv')
+
+        # Filter bboxes using the length of shorter sides
+        if USING_SHORTER_SIDE_FILTERING:
+            xs = xs * out_shape[1]
+            ys = ys * out_shape[0]
+            labels, bboxes, xs, ys = tfe.bboxes_filter_by_shorter_side(labels,
+                                                                       bboxes, xs, ys,
+                                                                       min_height=MIN_SHORTER_SIDE,
+                                                                       max_height=MAX_SHORTER_SIDE,
+                                                                       assign_value=LABEL_IGNORE)
+            xs = xs / out_shape[1]
+            ys = ys / out_shape[0]
+
+        # Randomly distort the colors. There are 4 ways to do it.
+        total_image = tf.concat([nc_dst_image, art_dst_image, pv_dst_image], axis=-1)
+        total_image_output = apply_with_random_selector_multiphase_multislice(
+            total_image,
+            lambda total_x, ordering: distort_color_multiphase_multislice(total_x, ordering, fast_mode),
+            num_cases=4)
+        nc_dst_image = total_image_output[:, :, 0:3]
+        art_dst_image = total_image_output[:, :, 3:6]
+        pv_dst_image = total_image_output[:, :, 6:9]
+        tf_summary_image(nc_dst_image, bboxes, 'image_color_distorted/nc')
+        tf_summary_image(art_dst_image, bboxes, 'image_color_distorted/art')
+        tf_summary_image(pv_dst_image, bboxes, 'image_color_distorted/pv')
+
+        # Rescale to VGG input scale.
+        nc_dst_image = nc_dst_image * 255.
+        nc_dst_image = tf_image_whitened(nc_dst_image, [_R_MEAN, _G_MEAN, _B_MEAN])
+
+        art_dst_image = art_dst_image * 255.
+        art_dst_image = tf_image_whitened(art_dst_image, [_R_MEAN, _G_MEAN, _B_MEAN])
+
+        pv_dst_image = pv_dst_image * 255.
+        pv_dst_image = tf_image_whitened(pv_dst_image, [_R_MEAN, _G_MEAN, _B_MEAN])
+        # Image data format.
+        if data_format == 'NCHW':
+            nc_dst_image = tf.transpose(nc_dst_image, perm=(2, 0, 1))
+            art_dst_image = tf.transpose(art_dst_image, perm=(2, 0, 1))
+            pv_dst_image = tf.transpose(pv_dst_image, perm=(2, 0, 1))
+        return nc_dst_image, art_dst_image, pv_dst_image, labels, bboxes, xs, ys
+
+
 def preprocess_for_eval(image, labels, bboxes, xs, ys,
                         out_shape, data_format='NHWC',
                         resize=Resize.WARP_RESIZE,
@@ -446,6 +798,59 @@ def preprocess_for_eval(image, labels, bboxes, xs, ys,
             image = tf.transpose(image, perm=(2, 0, 1))
         return image, labels, bboxes, xs, ys
 
+
+def preprocess_for_eval_multiphase_multislice(nc_image, art_image, pv_image, labels, bboxes, xs, ys,
+                        out_shape, data_format='NHWC',
+                        resize=Resize.WARP_RESIZE,
+                        do_resize=True,
+                        scope='ssd_preprocessing_train'):
+    """Preprocess an image for evaluation.
+
+    Args:
+        image: A `Tensor` representing an image of arbitrary size.
+        out_shape: Output shape after pre-processing (if resize != None)
+        resize: Resize strategy.
+
+    Returns:
+        A preprocessed image.
+    """
+    with tf.name_scope(scope):
+        if nc_image.get_shape().ndims != 3:
+            raise ValueError('Input must be of size [height, width, C>0]')
+        if art_image.get_shape().ndims != 3:
+            raise ValueError('Input must be of size [height, width, C>0]')
+        if pv_image.get_shape().ndims != 3:
+            raise ValueError('Input must be of size [height, width, C>0]')
+
+        nc_image = tf.to_float(nc_image)
+        nc_image = tf_image_whitened(nc_image, [_R_MEAN, _G_MEAN, _B_MEAN])
+
+        art_image = tf.to_float(art_image)
+        art_image = tf_image_whitened(art_image, [_R_MEAN, _G_MEAN, _B_MEAN])
+
+        pv_image = tf.to_float(pv_image)
+        pv_image = tf_image_whitened(pv_image, [_R_MEAN, _G_MEAN, _B_MEAN])
+
+        if do_resize:
+            if resize == Resize.NONE:
+                pass
+            else:
+                nc_image = tf_image.resize_image(nc_image, out_shape,
+                                                 method=tf.image.ResizeMethod.BILINEAR,
+                                                 align_corners=False)
+                art_image = tf_image.resize_image(art_image, out_shape,
+                                                  method=tf.image.ResizeMethod.BILINEAR,
+                                                  align_corners=False)
+                pv_image = tf_image.resize_image(pv_image, out_shape,
+                                                 method=tf.image.ResizeMethod.BILINEAR,
+                                                 align_corners=False)
+
+        # Image data format.
+        if data_format == 'NCHW':
+            nc_image = tf.transpose(nc_image, perm=(2, 0, 1))
+            art_image = tf.transpose(art_image, perm=(2, 0, 1))
+            pv_image = tf.transpose(pv_image, perm=(2, 0, 1))
+        return nc_image, art_image, pv_image, labels, bboxes, xs, ys
 
 def preprocess_image(image,
                      labels = None,
@@ -483,3 +888,42 @@ def preprocess_image(image,
                                    out_shape=out_shape,
                                    data_format=data_format,
                                    **kwargs)
+
+
+def preprocess_image_multiphase_multislice(nc_image, art_image, pv_image,
+                     labels = None,
+                     bboxes = None,
+                     xs = None, ys = None,
+                     out_shape = None,
+                     data_format = 'NHWC',
+                     is_training=False,
+                     **kwargs):
+    """Pre-process an given image.
+
+    Args:
+      image: A `Tensor` representing an image of arbitrary size.
+      output_height: The height of the image after preprocessing.
+      output_width: The width of the image after preprocessing.
+      is_training: `True` if we're preprocessing the image for training and
+        `False` otherwise.
+      resize_side_min: The lower bound for the smallest side of the image for
+        aspect-preserving resizing. If `is_training` is `False`, then this value
+        is used for rescaling.
+      resize_side_max: The upper bound for the smallest side of the image for
+        aspect-preserving resizing. If `is_training` is `False`, this value is
+         ignored. Otherwise, the resize side is sampled from
+         [resize_size_min, resize_size_max].
+
+    Returns:
+      A preprocessed image.
+    """
+    if is_training:
+        return preprocess_for_train_multiphase_multislice(nc_image, art_image, pv_image, labels, bboxes, xs, ys,
+                                    out_shape=out_shape,
+                                    data_format=data_format)
+    else:
+        return preprocess_for_eval_multiphase_multislice(nc_image, art_image, pv_image, labels, bboxes, xs, ys,
+                                   out_shape=out_shape,
+                                   data_format=data_format,
+                                   **kwargs)
+

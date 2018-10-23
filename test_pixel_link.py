@@ -12,6 +12,8 @@ import util
 import cv2
 import pixel_link
 from nets import pixel_link_symbol
+from glob import glob
+import os
 
 
 slim = tf.contrib.slim
@@ -58,7 +60,7 @@ tf.app.flags.DEFINE_bool('using_moving_average', True,
 tf.app.flags.DEFINE_float('moving_average_decay', 0.9999, 
                           'The decay rate of ExponentionalMovingAverage')
 
-
+tf.app.flags.DEFINE_bool('multiphase_multislice_flag', False, 'the data whether is multiphase and multislice')
 FLAGS = tf.app.flags.FLAGS
 
 def config_initialization():
@@ -72,11 +74,13 @@ def config_initialization():
     config.load_config(FLAGS.checkpoint_path)
     config.load_config(FLAGS.pred_path)
     config.load_config(FLAGS.score_map_path)
+    # config.load_config(FLAGS.multiphase_multislice_flag)
     config.init_config(image_shape, 
                        batch_size = 1, 
                        pixel_conf_threshold = 0.8,
                        link_conf_threshold = 0.8,
-                       num_gpus = 1, 
+                       num_gpus = 1,
+                       # multiphase_multislice_flag=False
                    )
     
     util.proc.set_proc_name('test_pixel_link_on'+ '_' + FLAGS.dataset_name)
@@ -121,6 +125,89 @@ def to_txt(txt_path, image_name,
     print('score will be written in ', score_map_path)
     write_result_as_txt(image_name, bboxes, txt_path)
     write_result_as_pred_txt(image_name, bboxes, bboxes_score)
+
+
+def test_multiphase_multislice():
+    with tf.name_scope('test'):
+        nc_image = tf.placeholder(dtype=tf.int32, shape=[None, None, 3])
+        art_image = tf.placeholder(dtype=tf.int32, shape=[None, None, 3])
+        pv_image = tf.placeholder(dtype=tf.int32, shape=[None, None, 3])
+        image_shape = tf.placeholder(dtype=tf.int32, shape=[3, ])
+        nc_processed_image, art_processed_image, pv_processed_image, _, _, _, _ = ssd_vgg_preprocessing.preprocess_image_multiphase_multislice(
+            nc_image, art_image, pv_image, None, None, None, None,
+            out_shape=config.image_shape,
+            data_format=config.data_format,
+            is_training=False)
+        b_nc_image = tf.expand_dims(nc_processed_image, axis=0)
+        b_art_image = tf.expand_dims(art_processed_image, axis=0)
+        b_pv_image = tf.expand_dims(pv_processed_image, axis=0)
+
+        net = pixel_link_symbol.PixelLinkNet_multiphase_multislice(b_nc_image, b_art_image, b_pv_image, is_training=True)
+        global_step = slim.get_or_create_global_step()
+
+    sess_config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
+    if FLAGS.gpu_memory_fraction < 0:
+        sess_config.gpu_options.allow_growth = True
+    elif FLAGS.gpu_memory_fraction > 0:
+        sess_config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_memory_fraction
+
+    checkpoint_dir = util.io.get_dir(FLAGS.checkpoint_path)
+    logdir = util.io.join_path(checkpoint_dir, 'test', FLAGS.dataset_name + '_' + FLAGS.dataset_split_name)
+
+    # Variables to restore: moving avg. or normal weights.
+    if FLAGS.using_moving_average:
+        variable_averages = tf.train.ExponentialMovingAverage(
+            FLAGS.moving_average_decay)
+        variables_to_restore = variable_averages.variables_to_restore()
+        variables_to_restore[global_step.op.name] = global_step
+    else:
+        variables_to_restore = slim.get_variables_to_restore()
+
+    saver = tf.train.Saver(var_list=variables_to_restore)
+
+    # image_names = util.io.ls(FLAGS.dataset_dir)
+    # image_names.sort()
+    image_names = glob(util.io.join_path(FLAGS.dataset_dir, '*_ART.jpg'))
+    image_names = [os.path.basename(image_name) for image_name in image_names]
+    image_names = [image_name[:-8] for image_name in image_names]
+    image_names.sort()
+    checkpoint = FLAGS.checkpoint_path
+    checkpoint_name = util.io.get_filename(str(checkpoint))
+    dump_path = util.io.join_path(logdir, checkpoint_name)
+    txt_path = util.io.join_path(dump_path, 'txt')
+    zip_path = util.io.join_path(dump_path, checkpoint_name + '_det.zip')
+
+    with tf.Session(config=sess_config) as sess:
+        saver.restore(sess, checkpoint)
+
+        for iter, image_name in enumerate(image_names):
+            nc_image_data = util.img.imread(
+                util.io.join_path(FLAGS.dataset_dir, image_name + '_NNC.jpg'), rgb=True)
+            art_image_data = util.img.imread(
+                util.io.join_path(FLAGS.dataset_dir, image_name + '_ART.jpg'), rgb=True)
+            pv_image_data = util.img.imread(
+                util.io.join_path(FLAGS.dataset_dir, image_name + '_PPV.jpg'), rgb=True)
+            image_name = image_name.split('.')[0]
+            pixel_pos_scores, link_pos_scores = sess.run(
+                [net.pixel_pos_scores, net.link_pos_scores],
+                feed_dict={
+                    nc_image: nc_image_data,
+                    art_image: art_image_data,
+                    pv_image: pv_image_data
+                })
+
+            print('%d/%d: %s' % (iter + 1, len(image_names), image_name))
+            to_txt(txt_path,
+                   image_name, pv_image_data,
+                   pixel_pos_scores, link_pos_scores)
+
+    # create zip file for icdar2015
+    cmd = 'cd %s;zip -j %s %s/*' % (dump_path, zip_path, txt_path)
+
+    print(cmd)
+    util.cmd.cmd(cmd)
+    print("zip file created: ", util.io.join_path(dump_path, zip_path))
+
 
 def test():
     with tf.name_scope('test'):
@@ -188,12 +275,17 @@ def test():
     cmd = 'cd %s;zip -j %s %s/*'%(dump_path, zip_path, txt_path)
 
     print(cmd)
-    util.cmd.cmd(cmd);
+    util.cmd.cmd(cmd)
     print("zip file created: ", util.io.join_path(dump_path, zip_path))
+
 
 def main(_):
     config_initialization()
-    test()
+    print('the multiphase_multislice_flag is ', FLAGS.multiphase_multislice_flag)
+    if not FLAGS.multiphase_multislice_flag:
+        test()
+    else:
+        test_multiphase_multislice()
                 
     
 if __name__ == '__main__':
