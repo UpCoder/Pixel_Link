@@ -226,7 +226,7 @@ def test():
     if FLAGS.gpu_memory_fraction < 0:
         sess_config.gpu_options.allow_growth = True
     elif FLAGS.gpu_memory_fraction > 0:
-        sess_config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_memory_fraction;
+        sess_config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_memory_fraction
     
     checkpoint_dir = util.io.get_dir(FLAGS.checkpoint_path)
     logdir = util.io.join_path(checkpoint_dir, 'test', FLAGS.dataset_name + '_' +FLAGS.dataset_split_name)
