@@ -63,6 +63,7 @@ tf.app.flags.DEFINE_integer('train_image_width', 512, 'Train image size')
 tf.app.flags.DEFINE_integer('train_image_height', 512, 'Train image size')
 tf.app.flags.DEFINE_string('file_pattern', 'medicalimage*.tfrecord', 'the pattern of tfrecords files')
 tf.app.flags.DEFINE_bool('multiphase_multislice_flag', False, 'whether the data is multiphase and multislice')
+tf.app.flags.DEFINE_bool('lstm_flag', False, 'whether the networks use the clstm')
 FLAGS = tf.app.flags.FLAGS
 def config_initialization():
     # image shape and feature layers shape inference
@@ -267,6 +268,79 @@ def sum_gradients(clone_grads):
 #         tf.summary.scalar("variables_and_gradients_" + v.op.name+'_mean',tf.reduce_mean(var))
     return averaged_grads
 
+def create_clones_multiphase_multislice_clstm(batch_queue):
+    with tf.device('/cpu:0'):
+        global_step = slim.create_global_step()
+        learning_rate = tf.constant(FLAGS.learning_rate, name='learning_rate')
+        optimizer = tf.train.MomentumOptimizer(learning_rate,
+                                               momentum=FLAGS.momentum, name='Momentum')
+
+        tf.summary.scalar('learning_rate', learning_rate)
+    # place clones
+    pixel_link_loss = 0  # for summary only
+    gradients = []
+    batch_size_tensor = tf.convert_to_tensor(FLAGS.batch_size, dtype=tf.int32)
+    for clone_idx, gpu in enumerate(config.gpus):
+        do_summary = clone_idx == 0  # only summary on the first clone
+        reuse = clone_idx > 0
+        with tf.variable_scope(tf.get_variable_scope(), reuse=reuse):
+            with tf.name_scope(config.clone_scopes[clone_idx]) as clone_scope:
+                with tf.device(gpu) as clone_device:
+                    b_nc_image, b_art_image, b_pv_image, b_pixel_cls_label, b_pixel_cls_weight, \
+                    b_pixel_link_label, b_pixel_link_weight = batch_queue.dequeue()
+                    # build model and loss
+                    net = pixel_link_symbol.PixelLinkNet_multiphase_multislice_clstm(b_nc_image, b_art_image,
+                                                                                     b_pv_image,
+                                                                                     is_training=True,
+                                                                                     batch_size_ph=batch_size_tensor)
+                    net.build_loss(
+                        pixel_cls_labels=b_pixel_cls_label,
+                        pixel_cls_weights=b_pixel_cls_weight,
+                        pixel_link_labels=b_pixel_link_label,
+                        pixel_link_weights=b_pixel_link_weight,
+                        do_summary=do_summary)
+
+                    # gather losses
+                    losses = tf.get_collection(tf.GraphKeys.LOSSES, clone_scope)
+                    assert len(losses) == 2
+                    total_clone_loss = tf.add_n(losses) / config.num_clones
+                    pixel_link_loss += total_clone_loss
+
+                    # gather regularization loss and add to clone_0 only
+                    if clone_idx == 0:
+                        regularization_loss = tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+                        total_clone_loss = total_clone_loss + regularization_loss
+
+                    # compute clone gradients
+                    clone_gradients = optimizer.compute_gradients(total_clone_loss)
+                    gradients.append(clone_gradients)
+
+    tf.summary.scalar('pixel_link_loss', pixel_link_loss)
+    tf.summary.scalar('regularization_loss', regularization_loss)
+
+    # add all gradients together
+    # note that the gradients do not need to be averaged, because the average operation has been done on loss.
+    averaged_gradients = sum_gradients(gradients)
+
+    apply_grad_op = optimizer.apply_gradients(averaged_gradients, global_step=global_step)
+
+    train_ops = [apply_grad_op]
+
+    bn_update_op = util.tf.get_update_op()
+    if bn_update_op is not None:
+        train_ops.append(bn_update_op)
+
+    # moving average
+    if FLAGS.using_moving_average:
+        tf.logging.info('using moving average in training, \
+        with decay = %f' % (FLAGS.moving_average_decay))
+        ema = tf.train.ExponentialMovingAverage(FLAGS.moving_average_decay)
+        ema_op = ema.apply(tf.trainable_variables())
+        with tf.control_dependencies([apply_grad_op]):  # ema after updating
+            train_ops.append(tf.group(ema_op))
+
+    train_op = control_flow_ops.with_dependencies(train_ops, pixel_link_loss, name='train_op')
+    return train_op
 
 def create_clones_multiphase_multislice(batch_queue):
     with tf.device('/cpu:0'):
@@ -419,7 +493,6 @@ def train(train_op):
         sess_config.gpu_options.allow_growth = True
     elif FLAGS.gpu_memory_fraction > 0:
         sess_config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_memory_fraction
-    
     init_fn = util.tf.get_init_fn(checkpoint_path = FLAGS.checkpoint_path, train_dir = FLAGS.train_dir, 
                                 ignore_missing_vars = FLAGS.ignore_missing_vars, checkpoint_exclude_scopes = FLAGS.checkpoint_exclude_scopes)
     saver = tf.train.Saver(max_to_keep = 500, write_version = 2)
@@ -440,13 +513,18 @@ def train(train_op):
 def main(_):
     # The choice of return dataset object via initialization method maybe confusing, 
     # but I need to print all configurations in this method, including dataset information.
-    dataset = config_initialization()   
+    dataset = config_initialization()
+    print('flag is ', FLAGS.multiphase_multislice_flag, FLAGS.lstm_flag)
     if not FLAGS.multiphase_multislice_flag:
         batch_queue = create_dataset_batch_queue(dataset)
         train_op = create_clones(batch_queue)
     else:
-        batch_queue = create_dataset_batch_queue_multiphase_multislice(dataset)
-        train_op = create_clones_multiphase_multislice(batch_queue)
+        if not FLAGS.lstm_flag:
+            batch_queue = create_dataset_batch_queue_multiphase_multislice(dataset)
+            train_op = create_clones_multiphase_multislice(batch_queue)
+        else:
+            batch_queue = create_dataset_batch_queue_multiphase_multislice(dataset)
+            train_op = create_clones_multiphase_multislice_clstm(batch_queue)
     train(train_op)
     
     
