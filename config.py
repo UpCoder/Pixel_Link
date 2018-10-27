@@ -8,6 +8,21 @@ from nets import pixel_link_symbol
 import pixel_link
 slim = tf.contrib.slim
 
+type2pixel = {
+    'CYST': (1, 50),
+    'FNH': (2, 100),
+    'HCC': (3, 150),
+    'HEM': (4, 200),
+    'METS': (5, 250)
+}
+pixel2type = {
+    50: 'CYST',
+    100: 'FNH',
+    150: 'HCC',
+    200: 'HEM',
+    250: 'METS'
+}
+
 #=====================================================================
 #====================Pre-processing params START======================
 # VGG mean parameters.
@@ -77,6 +92,7 @@ pixel_link_loss_weight = 1.0
 
 #=====================================================================
 #====================do-not-change configurations START===============
+num_tumor_type = 6 # LD 1+5
 num_classes = 2
 ignore_label = -1
 background_label = 0

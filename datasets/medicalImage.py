@@ -601,6 +601,42 @@ def dicom2jpg_multiphase(slice_dir, save_dir, phasenames=['NC', 'ART', 'PV'], ta
         f.writelines(lines)
         f.close()
 
+
+def static_pixel_num(image_dir, target_phase='PV'):
+    # {0: 217784361, 1: 1392043, 2: 209128, 3: 1486676, 4: 458278, 5: 705482}
+    # {0: 1.0, 156, 1041, 146, 475, 308}
+    static_res = {
+        0: 0,
+        1: 0,
+        2: 0,
+        3: 0,
+        4: 0,
+        5: 0
+    }
+    from convert2jpg import extract_bboxs_mask_from_mask
+    from config import pixel2type, type2pixel
+    for sub_name in ['train', 'val', 'test']:
+        names = os.listdir(os.path.join(image_dir, sub_name))
+        for name in names:
+            cur_slice_dir = os.path.join(image_dir, sub_name, name)
+            mhd_mask_path = glob(os.path.join(cur_slice_dir, 'Mask_%s*.mhd' % target_phase))[0]
+
+            mask_image = read_mhd_image(mhd_mask_path)
+            min_xs, min_ys, max_xs, max_ys, names, mask = extract_bboxs_mask_from_mask(mask_image,
+                                                                                       os.path.join(cur_slice_dir,
+                                                                                                    'tumor_types'))
+
+            for key in pixel2type.keys():
+                mask[mask == key] = type2pixel[pixel2type[key]][0]
+            pixel_value_set = np.unique(mask)
+            print pixel_value_set
+            for value in list(pixel_value_set):
+                static_res[value] += np.sum(mask == value)
+    print(static_res)
+
+
+
+
 if __name__ == '__main__':
     # for phasename in ['NC', 'ART', 'PV']:
     #     convert_dicomseries2mhd(
@@ -623,8 +659,4 @@ if __name__ == '__main__':
 
     # conver2JPG multi phase
     image_dir = '/home/give/Documents/dataset/LiverLesionDetection_Splited/0'
-    save_dir = '/home/give/Documents/dataset/LiverLesionDetection_Splited/JPG/0/MultiPhase'
-    phasenames = ['NC', 'ART', 'PV']
-    target_phase = 'PV'
-    suffix_name='npy'
-    MICCAI2018_Iterator(image_dir, dicom2jpg_multiphase, save_dir, phasenames, target_phase, suffix_name)
+    static_pixel_num(image_dir, 'PV')

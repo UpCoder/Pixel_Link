@@ -46,6 +46,74 @@ VOC_LABELS = {
 }
 
 
+def get_split_multiphase_multislice_mask(split_name, dataset_dir, file_pattern, reader,
+                                         split_to_sizes, items_to_descriptions, num_classes):
+    if split_name not in split_to_sizes:
+        raise ValueError('split name %s was not recognized.' % split_name)
+    print(split_name)
+    # file_pattern = os.path.join(dataset_dir, file_pattern % split_name)
+    file_pattern = os.path.join(dataset_dir, file_pattern)
+    # Allowing None in the signature so that dataset_factory can use the default.
+    if reader is None:
+        reader = tf.TFRecordReader
+    # Features in Pascal VOC TFRecords.
+    keys_to_features = {
+        'image/nc/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
+        'image/art/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
+        'image/pv/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
+        'image/mask/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
+        'image/format': tf.FixedLenFeature((), tf.string, default_value='PNG'),
+        'image/height': tf.FixedLenFeature([1], tf.int64),
+        'image/width': tf.FixedLenFeature([1], tf.int64),
+        'image/channels': tf.FixedLenFeature([1], tf.int64),
+        'image/shape': tf.FixedLenFeature([3], tf.int64),
+        'image/object/bbox/xmin': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/ymin': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/xmax': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/ymax': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/label': tf.VarLenFeature(dtype=tf.int64),
+        'image/object/bbox/difficult': tf.VarLenFeature(dtype=tf.int64),
+        'image/object/bbox/truncated': tf.VarLenFeature(dtype=tf.int64),
+    }
+    items_to_handlers = {
+        'nc_image': slim.tfexample_decoder.Image('image/nc/encoded', 'image/format'),
+        'art_image': slim.tfexample_decoder.Image('image/art/encoded', 'image/format'),
+        'pv_image': slim.tfexample_decoder.Image('image/pv/encoded', 'image/format'),
+        'mask_image': slim.tfexample_decoder.Image('image/mask/encoded', 'image/format', channels=1),
+        'shape': slim.tfexample_decoder.Tensor('image/shape'),
+        'object/bbox': slim.tfexample_decoder.BoundingBox(
+                ['ymin', 'xmin', 'ymax', 'xmax'], 'image/object/bbox/'),
+        'object/oriented_bbox/x1': slim.tfexample_decoder.Tensor('image/object/bbox/xmin'),
+        'object/oriented_bbox/x2': slim.tfexample_decoder.Tensor('image/object/bbox/xmax'),
+        'object/oriented_bbox/x3': slim.tfexample_decoder.Tensor('image/object/bbox/xmax'),
+        'object/oriented_bbox/x4': slim.tfexample_decoder.Tensor('image/object/bbox/xmin'),
+        'object/oriented_bbox/y1': slim.tfexample_decoder.Tensor('image/object/bbox/ymin'),
+        'object/oriented_bbox/y2': slim.tfexample_decoder.Tensor('image/object/bbox/ymin'),
+        'object/oriented_bbox/y3': slim.tfexample_decoder.Tensor('image/object/bbox/ymax'),
+        'object/oriented_bbox/y4': slim.tfexample_decoder.Tensor('image/object/bbox/ymax'),
+        'object/label': slim.tfexample_decoder.Tensor('image/object/bbox/label'),
+        'object/difficult': slim.tfexample_decoder.Tensor('image/object/bbox/difficult'),
+        'object/truncated': slim.tfexample_decoder.Tensor('image/object/bbox/truncated'),
+    }
+    decoder = slim.tfexample_decoder.TFExampleDecoder(
+        keys_to_features, items_to_handlers)
+
+    labels_to_names = None
+    if dataset_utils.has_labels(dataset_dir):
+        labels_to_names = dataset_utils.read_label_file(dataset_dir)
+    # else:
+    #     labels_to_names = create_readable_names_for_imagenet_labels()
+    #     dataset_utils.write_label_file(labels_to_names, dataset_dir)
+
+    return slim.dataset.Dataset(
+            data_sources=file_pattern,
+            reader=reader,
+            decoder=decoder,
+            num_samples=split_to_sizes[split_name],
+            items_to_descriptions=items_to_descriptions,
+            num_classes=num_classes,
+            labels_to_names=labels_to_names)
+
 def get_split_multiphase_multislice(split_name, dataset_dir, file_pattern, reader,
                                     split_to_sizes, items_to_descriptions, num_classes):
     if split_name not in split_to_sizes:

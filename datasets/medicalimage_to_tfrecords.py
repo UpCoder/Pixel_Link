@@ -71,7 +71,108 @@ MEDICAL_LABELS = {
     'HEM': (1, 'Begin'),
     'METS': (1, 'Begin'),
 }
+MEDICAL_LABELS_multi_category = {
+    'none': (0, 'Background'),
+    'CYST': (1, 'Begin'),
+    'FNH': (2, 'Begin'),
+    'HCC': (3, 'Begin'),
+    'HEM': (4, 'Begin'),
+    'METS': 51, 'Begin'),
+}
+suffix_type = b'JPEG'
+suffix_type_name = 'jpg'
 
+
+def _process_image_multiphase_multislice_mask(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
+    """Process a image and annotation file.
+
+    Args:
+      filename: string, path to an image file e.g., '/path/to/example.JPG'.
+      coder: instance of ImageCoder to provide TensorFlow image coding utils.
+    Returns:
+      image_buffer: string, JPEG encoding of RGB image.
+      height: integer, image height in pixels.
+      width: integer, image width in pixels.
+    """
+    # Read the image file.
+    nc_filename = os.path.join(directory, DIRECTORY_IMAGES, name + '_NNC.' + suffix_type_name)
+    print('nc filename is ', nc_filename)
+    if not os.path.exists(nc_filename):
+        print('it does not exists')
+        assert False
+    nc_image_data = tf.gfile.FastGFile(nc_filename, 'rb').read()
+
+    art_filename = os.path.join(directory, DIRECTORY_IMAGES, name + '_ART.' + suffix_type_name)
+    print('art filename is ', art_filename)
+    if not os.path.exists(art_filename):
+        print('it does not exists')
+        assert False
+    art_image_data = tf.gfile.FastGFile(art_filename, 'rb').read()
+
+    pv_filename = os.path.join(directory, DIRECTORY_IMAGES, name + '_PPV.' + suffix_type_name)
+    print('pv filename is ', pv_filename)
+    if not os.path.exists(pv_filename):
+        print('it does not exists')
+        assert False
+    pv_image_data = tf.gfile.FastGFile(pv_filename, 'rb').read()
+
+    mask_filename = os.path.join(directory, DIRECTORY_IMAGES + '_mask', name + '.' + suffix_type_name)
+    print('mask filename is ', mask_filename)
+    if not os.path.exists(mask_filename):
+        print('it does not exists')
+        assert False
+    mask_image_data = tf.gfile.FastGFile(mask_filename, 'rb').read()
+
+    # print(image_data)
+    # if not multiphase_flag:
+    #     filename = directory + DIRECTORY_IMAGES + name + '.jpg'
+    #     print('filename is ', filename)
+    #     image_data = tf.gfile.FastGFile(filename, 'rb').read()
+    #     print(image_data)
+    # else:
+    #     filename = directory + DIRECTORY_IMAGES + name + '.bin'
+    #     print('filename is ', filename)
+    #     image_data = tf.gfile.FastGFile(filename, 'rb').read()
+
+    # Read the XML annotation file.
+    filename = os.path.join(directory, DIRECTORY_ANNOTATIONS, name + '.xml')
+    tree = ET.parse(filename)
+    root = tree.getroot()
+
+    # Image shape.
+    size = root.find('size')
+    shape = [int(size.find('height').text),
+             int(size.find('width').text),
+             int(size.find('depth').text)]
+    # Find annotations.
+    bboxes = []
+    labels = []
+    labels_text = []
+    difficult = []
+    truncated = []
+    for obj in root.findall('object'):
+        label = obj.find('name').text
+        labels.append(int(MEDICAL_LABELS[label][0]))
+        # labels.append(0)
+        labels_text.append(label.encode('ascii'))
+
+        if obj.find('difficult'):
+            difficult.append(int(obj.find('difficult').text))
+        else:
+            difficult.append(0)
+        if obj.find('truncated'):
+            truncated.append(int(obj.find('truncated').text))
+        else:
+            truncated.append(0)
+
+        bbox = obj.find('bndbox')
+        bboxes.append((float(bbox.find('ymin').text) / shape[0],
+                       float(bbox.find('xmin').text) / shape[1],
+                       float(bbox.find('ymax').text) / shape[0],
+                       float(bbox.find('xmax').text) / shape[1]
+                       ))
+    return nc_image_data, art_image_data, pv_image_data, mask_image_data, shape, bboxes, labels, labels_text,\
+           difficult,truncated
 
 def _process_image_multiphase_multislice(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
     """Process a image and annotation file.
@@ -85,21 +186,21 @@ def _process_image_multiphase_multislice(directory, name, DIRECTORY_IMAGES, DIRE
       width: integer, image width in pixels.
     """
     # Read the image file.
-    nc_filename = directory + DIRECTORY_IMAGES + name + '_NNC.jpg'
+    nc_filename = os.path.join(directory, DIRECTORY_IMAGES, name + '_NNC.jpg')
     print('nc filename is ', nc_filename)
     if not os.path.exists(nc_filename):
         print('it does not exists')
         assert False
     nc_image_data = tf.gfile.FastGFile(nc_filename, 'rb').read()
 
-    art_filename = directory + DIRECTORY_IMAGES + name + '_ART.jpg'
+    art_filename = os.path.join(directory, DIRECTORY_IMAGES, name + '_ART.jpg')
     print('art filename is ', art_filename)
     if not os.path.exists(art_filename):
         print('it does not exists')
         assert False
     art_image_data = tf.gfile.FastGFile(art_filename, 'rb').read()
 
-    pv_filename = directory + DIRECTORY_IMAGES + name + '_PPV.jpg'
+    pv_filename = os.path.join(directory, DIRECTORY_IMAGES, name + '_PPV.jpg')
     print('pv filename is ', pv_filename)
     if not os.path.exists(pv_filename):
         print('it does not exists')
@@ -221,6 +322,52 @@ def _process_image(directory, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
                        ))
     return image_data, shape, bboxes, labels, labels_text, difficult, truncated
 
+def _convert_to_example_multiphase_multislice_mask(nc_image_data, art_image_data, pv_image_data, mask_image_data, labels, labels_text,
+                                              bboxes, shape, difficult, truncated):
+    """Build an Example proto for an image example.
+
+    Args:
+      image_data: string, JPEG encoding of RGB image;
+      labels: list of integers, identifier for the ground truth;
+      labels_text: list of strings, human-readable labels;
+      bboxes: list of bounding boxes; each box is a list of integers;
+          specifying [xmin, ymin, xmax, ymax]. All boxes are assumed to belong
+          to the same label as the image label.
+      shape: 3 integers, image shapes in pixels.
+    Returns:
+      Example proto
+    """
+    xmin = []
+    ymin = []
+    xmax = []
+    ymax = []
+    for b in bboxes:
+        assert len(b) == 4
+        # pylint: disable=expression-not-assigned
+        [l.append(point) for l, point in zip([ymin, xmin, ymax, xmax], b)]
+        # pylint: enable=expression-not-assigned
+
+    image_format = suffix_type
+    print('image_format is ', image_format)
+    example = tf.train.Example(features=tf.train.Features(feature={
+            'image/height': int64_feature(shape[0]),
+            'image/width': int64_feature(shape[1]),
+            'image/channels': int64_feature(shape[2]),
+            'image/shape': int64_feature(shape),
+            'image/object/bbox/xmin': float_feature(xmin),
+            'image/object/bbox/xmax': float_feature(xmax),
+            'image/object/bbox/ymin': float_feature(ymin),
+            'image/object/bbox/ymax': float_feature(ymax),
+            'image/object/bbox/label': int64_feature(labels),
+            'image/object/bbox/label_text': bytes_feature(labels_text),
+            'image/object/bbox/difficult': int64_feature(difficult),
+            'image/object/bbox/truncated': int64_feature(truncated),
+            'image/format': bytes_feature(image_format),
+            'image/mask/encoded': bytes_feature(mask_image_data),
+            'image/nc/encoded': bytes_feature(nc_image_data),
+            'image/art/encoded': bytes_feature(art_image_data),
+            'image/pv/encoded': bytes_feature(pv_image_data)}))
+    return example
 
 def _convert_to_example_multiphase_multislice(nc_image_data, art_image_data, pv_image_data, labels, labels_text,
                                               bboxes, shape, difficult, truncated):
@@ -311,6 +458,12 @@ def _convert_to_example(image_data, labels, labels_text, bboxes, shape,
             'image/encoded': bytes_feature(image_data)}))
     return example
 
+def _add_to_tfrecord_multiphase_multislice_mask(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
+    nc_image_data, art_image_data, pv_image_data, mask_image_data, shape, bboxes, labels, labels_text, difficult, truncated = \
+        _process_image_multiphase_multislice_mask(dataset_dir, name, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS)
+    example = _convert_to_example_multiphase_multislice_mask(nc_image_data, art_image_data, pv_image_data, mask_image_data,
+                                                             labels, labels_text, bboxes, shape, difficult, truncated)
+    tfrecord_writer.write(example.SerializeToString())
 
 def _add_to_tfrecord_multiphase_multislice(dataset_dir, name, tfrecord_writer, DIRECTORY_IMAGES, DIRECTORY_ANNOTATIONS):
     nc_image_data, art_image_data, pv_image_data, shape, bboxes, labels, labels_text, difficult, truncated = \
@@ -339,14 +492,25 @@ def _get_output_filename(output_dir, name, idx):
     return '%s/%s_%03d.tfrecord' % (output_dir, name, idx)
 
 
-def run(dataset_dir, output_dir, name='voc_train', shuffling=False,
-        DIRECTORY_IMAGES='JPEGImages/', DIRECTORY_ANNOTATIONS='Annotations/', multiphase_multislice_flag=False):
+def run(dataset_dir, output_dir, name='voc_train', shuffling=False, DIRECTORY_IMAGES='JPEGImages/',
+        DIRECTORY_ANNOTATIONS='Annotations/', multiphase_multislice_flag=False, mask_flag=False, p_suffix_type_name='JPEG'):
     """Runs the conversion operation.
 
     Args:
       dataset_dir: The dataset directory where the dataset is stored.
       output_dir: Output directory.
     """
+    global suffix_type
+    global suffix_type_name
+    if p_suffix_type_name == 'JPEG':
+        suffix_type = b'JPEG'
+        suffix_type_name = 'jpg'
+    elif p_suffix_type_name == 'PNG':
+        suffix_type = b'PNG'
+        suffix_type_name = 'PNG'
+    else:
+        print(p_suffix_type_name)
+        assert False
     if not tf.gfile.Exists(dataset_dir):
         tf.gfile.MakeDirs(dataset_dir)
 
@@ -377,8 +541,13 @@ def run(dataset_dir, output_dir, name='voc_train', shuffling=False,
                 else:
                     img_name = filename[:-4]
                     print(filename)
-                    _add_to_tfrecord_multiphase_multislice(dataset_dir, img_name, tfrecord_writer, DIRECTORY_IMAGES,
-                                                           DIRECTORY_ANNOTATIONS)
+                    if not mask_flag:
+                        _add_to_tfrecord_multiphase_multislice(dataset_dir, img_name, tfrecord_writer, DIRECTORY_IMAGES,
+                                                               DIRECTORY_ANNOTATIONS)
+                    else:
+                        _add_to_tfrecord_multiphase_multislice_mask(dataset_dir, img_name, tfrecord_writer,
+                                                                    DIRECTORY_IMAGES,
+                                                                    DIRECTORY_ANNOTATIONS)
                 i += 1
                 j += 1
             fidx += 1

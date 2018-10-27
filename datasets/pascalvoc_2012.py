@@ -69,7 +69,7 @@ SPLITS_TO_STATISTICS = {
 NUM_CLASSES = 20
 
 
-def get_split(split_name, dataset_dir, file_pattern=None, reader=None, multiphase_multislice_flag=False):
+def get_split(split_name, dataset_dir, file_pattern=None, reader=None, multiphase_multislice_flag=False, mask_flag=False):
     """Gets a dataset tuple with instructions for reading ImageNet.
 
     Args:
@@ -96,8 +96,15 @@ def get_split(split_name, dataset_dir, file_pattern=None, reader=None, multiphas
                                           ITEMS_TO_DESCRIPTIONS,
                                           NUM_CLASSES)
     else:
-        return pascalvoc_common.get_split_multiphase_multislice(split_name, dataset_dir,
-                                                                file_pattern, reader,
-                                                                SPLITS_TO_SIZES,
-                                                                ITEMS_TO_DESCRIPTIONS,
-                                                                NUM_CLASSES)
+        if not mask_flag:
+            return pascalvoc_common.get_split_multiphase_multislice(split_name, dataset_dir,
+                                                                    file_pattern, reader,
+                                                                    SPLITS_TO_SIZES,
+                                                                    ITEMS_TO_DESCRIPTIONS,
+                                                                    NUM_CLASSES)
+        else:
+            return pascalvoc_common.get_split_multiphase_multislice_mask(split_name, dataset_dir,
+                                                                         file_pattern, reader,
+                                                                         SPLITS_TO_SIZES,
+                                                                         ITEMS_TO_DESCRIPTIONS,
+                                                                         NUM_CLASSES)

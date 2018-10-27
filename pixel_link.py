@@ -194,8 +194,8 @@ def cal_gt_for_single_image(normed_xs, normed_ys, labels):
                 per_pixel_weight = per_bbox_weight / num_bbox_pixels
                 pixel_cls_weight += bbox_positive_pixel_mask * per_pixel_weight
         else:
-            raise ValueError, 'pixel_cls_weight_method not supported:%s'\
-                        %(pixel_cls_weight_method)
+            raise ValueError('pixel_cls_weight_method not supported:%s'\
+                        %(pixel_cls_weight_method))
 
     
         ## calculate the labels and weights of links

@@ -48,6 +48,12 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_boolean(
     'multiphase_multislice_flag', False, 'the dataset is multiphase ?'
 )
+tf.app.flags.DEFINE_boolean(
+    'mask_flag', False, 'whether we need to generate mask'
+)
+tf.app.flags.DEFINE_string(
+    'suffix_type', 'JPEG', 'the type of image'
+)
 
 def main(_):
     if not FLAGS.dataset_dir:
@@ -56,10 +62,15 @@ def main(_):
     print('Output directory:', FLAGS.output_dir)
 
     if FLAGS.dataset_name == 'medicalimage':
+        print('FLAGS.mask_flag:', FLAGS.mask_flag)
+        print('FLAGS.suffix_type:', FLAGS.suffix_type)
+        print('FLAGS.multiphase_multislice_flag:', FLAGS.multiphase_multislice_flag)
         medicalimage_to_tfrecords.run(FLAGS.dataset_dir, FLAGS.output_dir, FLAGS.output_name,
-                                      DIRECTORY_IMAGES=FLAGS.stage_name + '/',
-                                      DIRECTORY_ANNOTATIONS=FLAGS.stage_name + '_xml/',
-                                      multiphase_multislice_flag=FLAGS.multiphase_multislice_flag)
+                                      DIRECTORY_IMAGES=FLAGS.stage_name,
+                                      DIRECTORY_ANNOTATIONS=FLAGS.stage_name + '_xml',
+                                      mask_flag = FLAGS.mask_flag,
+                                      p_suffix_type_name = FLAGS.suffix_type,
+                                      multiphase_multislice_flag=FLAGS.multiphase_multislice_flag,)
     else:
         raise ValueError('Dataset [%s] was not recognized.' % FLAGS.dataset_name)
 
